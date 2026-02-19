@@ -1,0 +1,79 @@
+version: '3.9'
+
+services:
+  netdiag:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: netdiag-service
+    ports:
+      - "5001:5000"
+    volumes:
+      - netdiag-data:/data
+      - ./config:/config:ro
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    restart: unless-stopped
+    networks:
+      - netdiag-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "app=netdiag"
+      - "version=1.0"
+
+  influxdb:
+    image: influxdb:2.7-alpine
+    container_name: netdiag-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb-data:/var/lib/influxdb2
+    environment:
+      - INFLUXDB_DB=netdiag
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=admin123
+      - INFLUXDB_RETENTION=30d
+    restart: unless-stopped
+    networks:
+      - netdiag-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "app=netdiag-storage"
+
+volumes:
+  netdiag-data:
+    driver: local
+  influxdb-data:
+    driver: local
+
+networks:
+  netdiag-network:
+    driver: bridge

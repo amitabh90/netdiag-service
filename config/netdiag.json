@@ -1,0 +1,12 @@
+{
+  "targets": [
+    "8.8.8.8",
+    "1.1.1.1",
+    "1.0.0.1",
+    "9.9.9.9"
+  ],
+  "scan_interval_seconds": 60,
+  "ping_count": 4,
+  "alert_loss_threshold_pct": 5,
+  "alert_latency_threshold_ms": 100
+}

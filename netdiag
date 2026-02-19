@@ -1,0 +1,100 @@
+#!/bin/bash
+#
+# netdiag CLI - Simple client to interact with Network Diagnostics Service
+#
+
+API_URL="${NETDIAG_URL:-http://localhost:5001}"
+
+usage() {
+    cat << EOF
+Usage: netdiag <command> [options]
+
+Commands:
+  health                     - Check service health
+  scan [targets]            - Trigger on-demand scan (comma-separated or from config)
+  results                   - Get latest scan results
+  results <host>            - Get results for specific host
+  config                    - Show current configuration
+  config set <key> <value>  - Update configuration
+  history <host> [hours]    - Get historical data for a host
+
+Examples:
+  netdiag health
+  netdiag scan 8.8.8.8,1.1.1.1
+  netdiag results
+  netdiag results 8.8.8.8
+  netdiag history 8.8.8.8 2
+  netdiag config set alert_loss_threshold_pct 10
+
+EOF
+    exit 0
+}
+
+if [ -z "$1" ]; then
+    usage
+fi
+
+case "$1" in
+    health)
+        echo "Checking health..."
+        curl -s "$API_URL/health" | jq .
+        ;;
+    
+    scan)
+        if [ -n "$2" ]; then
+            targets=$(echo "$2" | tr ',' '\n' | jq -R . | jq -s .)
+            echo "Scanning targets: $2"
+            curl -s -X POST "$API_URL/api/scan" \
+                -H "Content-Type: application/json" \
+                -d "{\"targets\": $targets}" | jq .
+        else
+            echo "Scanning default targets..."
+            curl -s -X POST "$API_URL/api/scan" \
+                -H "Content-Type: application/json" \
+                -d '{}' | jq .
+        fi
+        ;;
+    
+    results)
+        if [ -n "$2" ]; then
+            echo "Results for host: $2"
+            curl -s "$API_URL/api/results/$2" | jq .
+        else
+            echo "Latest scan results:"
+            curl -s "$API_URL/api/results" | jq .
+        fi
+        ;;
+    
+    history)
+        if [ -z "$2" ]; then
+            echo "Error: host required"
+            exit 1
+        fi
+        hours=${3:-1}
+        echo "Historical data for $2 (last $hours hour(s)):"
+        curl -s "$API_URL/api/results/$2?hours=$hours" | jq .
+        ;;
+    
+    config)
+        if [ -z "$2" ]; then
+            echo "Current configuration:"
+            curl -s "$API_URL/api/config" | jq .
+        elif [ "$2" = "set" ]; then
+            if [ -z "$3" ] || [ -z "$4" ]; then
+                echo "Error: config set <key> <value>"
+                exit 1
+            fi
+            echo "Updating config: $3 = $4"
+            config=$(curl -s "$API_URL/api/config")
+            new_config=$(echo "$config" | jq ".${3} = ($4 | tonumber? // .)")
+            curl -s -X PUT "$API_URL/api/config" \
+                -H "Content-Type: application/json" \
+                -d "$new_config" | jq .
+        fi
+        ;;
+    
+    *)
+        echo "Unknown command: $1"
+        usage
+        ;;
+esac

@@ -1,0 +1,188 @@
+╔════════════════════════════════════════════════════════════════════════════╗
+║         Network Diagnostics Service - SRE Tool Cheat Sheet                 ║
+╚════════════════════════════════════════════════════════════════════════════╝
+
+STARTUP
+───────────────────────────────────────────────────────────────────────────────
+cd netdiag-service
+docker compose up -d                           # Start service + InfluxDB
+docker compose ps                              # Verify running
+./netdiag health                               # Verify health
+
+BASIC COMMANDS
+───────────────────────────────────────────────────────────────────────────────
+./netdiag scan <targets>                       # Scan hosts (comma-separated)
+./netdiag results                              # Show all latest results
+./netdiag results <host>                       # Show specific host results
+./netdiag history <host> [hours]               # Show historical data
+./netdiag config                               # Show configuration
+./netdiag config set <key> <value>             # Update config value
+
+EXAMPLE SCANS
+───────────────────────────────────────────────────────────────────────────────
+./netdiag scan 8.8.8.8                         # Single host
+./netdiag scan 8.8.8.8,1.1.1.1,1.0.0.1        # Multiple hosts
+./netdiag scan google.com,github.com           # Hostnames too
+
+VIEWING DATA
+───────────────────────────────────────────────────────────────────────────────
+./netdiag results                              # All hosts, latest scan
+./netdiag results 8.8.8.8                      # Specific host
+./netdiag history 8.8.8.8 1                    # Last 1 hour
+./netdiag history 8.8.8.8 24                   # Last 24 hours
+./netdiag history 8.8.8.8 7                    # Last 7 days
+
+CONFIGURATION
+───────────────────────────────────────────────────────────────────────────────
+Edit config/netdiag.json:
+  - targets: ["8.8.8.8", "1.1.1.1"]           # Hosts to monitor
+  - scan_interval_seconds: 60                  # How often to scan
+  - alert_loss_threshold_pct: 5                # Alert if loss > 5%
+  - alert_latency_threshold_ms: 100            # Alert if latency > 100ms
+
+Apply config changes:
+docker compose restart netdiag-service
+
+MONITORING & LOGS
+───────────────────────────────────────────────────────────────────────────────
+docker compose logs -f netdiag-service         # Watch all logs
+docker compose logs -f | grep ALERT            # Watch alerts only
+docker compose logs -f | grep "scan complete"  # Watch scans
+
+CLEANUP & SHUTDOWN
+───────────────────────────────────────────────────────────────────────────────
+docker compose stop                            # Pause service (keep data)
+docker compose restart netdiag-service         # Restart service
+docker compose down                            # Stop all containers
+docker compose down -v                         # Stop + delete all data
+
+REST API (curl)
+───────────────────────────────────────────────────────────────────────────────
+Health:
+  curl http://localhost:5001/health
+
+Scan:
+  curl -X POST http://localhost:5001/api/scan \
+    -H "Content-Type: application/json" \
+    -d '{"targets": ["8.8.8.8"]}'
+
+Results:
+  curl http://localhost:5001/api/results
+  curl http://localhost:5001/api/results/8.8.8.8
+  curl "http://localhost:5001/api/results/8.8.8.8?hours=2"
+
+Config:
+  curl http://localhost:5001/api/config
+  curl -X PUT http://localhost:5001/api/config \
+    -d '{"alert_latency_threshold_ms": 150}'
+
+DATABASE (SQLite)
+───────────────────────────────────────────────────────────────────────────────
+Count all measurements:
+  docker exec netdiag-service sqlite3 /data/netdiag.db \
+    "SELECT COUNT(*) FROM ping_results;"
+
+Get last 10 for a host:
+  docker exec netdiag-service sqlite3 /data/netdiag.db \
+    "SELECT timestamp, status, avg_ms, packet_loss_pct FROM ping_results \
+     WHERE host='8.8.8.8' LIMIT 10;"
+
+Clean old data (>30 days):
+  docker exec netdiag-service sqlite3 /data/netdiag.db \
+    "DELETE FROM ping_results WHERE datetime(timestamp) \
+     < datetime('now', '-30 days');"
+
+DATABASE SCHEMA
+───────────────────────────────────────────────────────────────────────────────
+ping_results table:
+  - timestamp (ISO format)
+  - host (IP or hostname)
+  - status ("up" or "down")
+  - min_ms, avg_ms, max_ms (latency)
+  - packet_loss_pct (0-100)
+  - packets_sent, packets_received
+
+PYTHON SCRIPT EXAMPLES
+───────────────────────────────────────────────────────────────────────────────
+from netdiag_client import NetDiagClient
+client = NetDiagClient()
+
+# Scan
+results = client.scan(["8.8.8.8", "1.1.1.1"])
+
+# Print results
+client.print_results(results)
+
+# Get history
+history = client.get_history("8.8.8.8", hours=1)
+
+# Update config
+client.set_config_value("alert_loss_threshold_pct", 10)
+
+REAL-WORLD USE CASES
+───────────────────────────────────────────────────────────────────────────────
+Monitor DNS servers:
+  targets: ["8.8.8.8", "1.1.1.1", "9.9.9.9", "208.67.222.222"]
+
+Monitor cloud regions:
+  targets: ["ec2-us-east-1.amazonaws.com", "ec2-eu-west-1.amazonaws.com"]
+
+Monitor internal services:
+  targets: ["api.internal", "db.internal", "cache.internal"]
+
+SLA compliance check:
+  1. Set alert_loss_threshold_pct: 0.5
+  2. Set alert_latency_threshold_ms: 50
+  3. Watch logs for violations
+
+TROUBLESHOOTING
+───────────────────────────────────────────────────────────────────────────────
+Service won't start:
+  docker compose logs netdiag-service
+  → Check if port 5001 is already in use
+  → Edit docker-compose.yml, change port to 5002
+
+Hosts showing "down":
+  → ICMP might be blocked by firewall
+  → Try: docker exec netdiag-service fping 8.8.8.8
+  → If blocked, configure firewall to allow ICMP
+
+High latency spike:
+  → Check: ./netdiag history <host> 1
+  → Is it consistent or temporary?
+  → Network congestion or ISP issue
+
+No data showing:
+  → Service just started (need wait for first scan)
+  → Check: docker compose logs netdiag-service
+  → Verify: curl http://localhost:5001/health
+
+PORTS & NETWORKING
+───────────────────────────────────────────────────────────────────────────────
+netdiag-service:  5001 (HTTP API)
+influxdb:         8086 (metrics DB)
+Both connected via "netdiag-network" bridge network
+
+FILES TO KNOW
+───────────────────────────────────────────────────────────────────────────────
+./netdiag                  ← CLI tool (use this!)
+netdiag_client.py          ← Python library
+app.py                     ← Service code (don't edit)
+config/netdiag.json        ← EDIT THIS for settings
+docker-compose.yml         ← EDIT THIS for ports/volumes
+QUICK START.md             ← Read this first
+OPERATIONS.md              ← Full reference
+
+PRODUCTION DEPLOYMENT
+───────────────────────────────────────────────────────────────────────────────
+docker compose -f docker-compose.prod.yml up -d
+
+Features:
+  - Resource limits (CPU 0.5, Memory 256M)
+  - JSON logging with rotation
+  - Proper restart policies
+  - Health checks configured
+
+═════════════════════════════════════════════════════════════════════════════
+For full documentation, see: HOW_TO_USE.md, OPERATIONS.md, START_HERE.md
+═════════════════════════════════════════════════════════════════════════════
