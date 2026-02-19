@@ -5,7 +5,6 @@ A production-ready Docker-based network monitoring service for SREs. Built on **
 ## Quick Start (2 minutes)
 
 ```bash
-cd netdiag-service
 docker compose up -d              # Start service
 ./netdiag health                  # Verify running
 ./netdiag scan 8.8.8.8,1.1.1.1   # Run your first scan
